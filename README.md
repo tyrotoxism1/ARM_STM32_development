@@ -1,5 +1,6 @@
 # Overview
-This repo contains different projects developed for the STM32F446 ARM development board. The goal is to learn and document ARM ISA and embedded system development
+- This repo contains different projects developed for the STM32F446 ARM development board. The goal is to learn and document ARM ISA and embedded system development
+- This branch specifically accomplishes the simple challenge of using an external LED instead of LD2.
 
 # Notes
 ## `STM32-base-STM32Cube` altered
