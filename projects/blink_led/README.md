@@ -1,5 +1,5 @@
-# Blink\_led Overview
-- This is a simple start project that turns on and off the LD2 led on the STM32F446 development board from Nucleo
+# Blink\_led Challenge 3 Overview
+- For this project we implement  
     - Project uses a very quick and dirty delay implementation and toggles the led value
 - This file aims to provide insight and explanation for what the specific ports, variables, etc. used in the project are doing and where they come from/mean
 
