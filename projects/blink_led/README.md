@@ -1,6 +1,8 @@
 # Blink\_led Challenge 3 Overview
-- For this project we implement  
-    - Project uses a very quick and dirty delay implementation and toggles the led value
+- For this project we'll use a timer to control the delay and toggle the LED
+    - We'll use Timer6 as the basic timer and utilize the timer interrupt to control toggling the LED
+    - This allows us to execute other code in between toggling the LED as we aren't forcing the processesor to 
+do nothing for an extended delay 
 - This file aims to provide insight and explanation for what the specific ports, variables, etc. used in the project are doing and where they come from/mean
 
 # Program Flow
@@ -14,42 +16,18 @@
         - `01` = Output
         - `10` = Alternate function
         - `11` = Analog Mode   
-4. Create an infinite loop
-5. Toggle LD2 LED on and off
-    - Using the XOR operation, we flip whatever value is stored in data, effectively toggling the value on and off
-    - We can access the data in the OUTPUT DATA register(ODR) of pin 5 with `GPIO_ODR_OD5`
-        - Then we assign the toggled value to the ODR itself with `GPIO->ODR`
-6. Delay infinite loop
-    - To create a super simple delay, we just execute a bunch of nothing instructions in a for-loop
-
-7. That's It!
-
-# Abbreviation Breakdown
-- RCC => Reset and Clock Control 
-    - This module is used to enable/disable clock signals sent to different peripherals
-- AHB1ENR => Advanced High-Performance Bus 1 Enable Register
-    - The [STM32F446](https://www.st.com/resource/en/datasheet/stm32f446re.pdf) interconnects all Majors (CPUS, DMAs, USB HS) and subordinates (flash mem, RAM, QuadSPI, etc) using a bus matrix
-    - Thus we need to let the CPU know which bus to connect to. 
-    - So we set AHB1ENR to enable the GPIO A clock 
-- GPIO => General Purpose Input/Output
-    - This refers to peripheral pins for a board that deal with input and output data
-- RCC\_AHB1ENR\_GPIOAEN => GPIO A Enable
-    - This refers to the address of the GPIOA clock which is `0x00000001` 
-- MODER => Mode Register
-- GPIO\_MODER\_MODER5\_0 => This is a bit mask that sets the mode for pin 5  to output
-    - Going to the definition of GPIO\_MODER\_MODER5\_0, it expands to the value `0x00000400` which is `0b0100 0000 0000`. 
-        - So we can start to see that the structure of the address, since if we group the binary value into groups of 2 bits, we can see that the expansion is setting the 5th set of bits.
-        ```
-        0b |01| |00| |00| |00| |00| |00|
-            P5   P4   P3   P2   P1   P0 
-        ```
-        - If we set this value to `0x00000C00` (`0b1100 0000 0000`) we would be setting Pin 5 to Analog mode
-- ODR => Output Data Register
-    - Using `GPIO_ODR` we can set the value of the ODR. 
-    - Each GPIO has its own ODR, where each ODR is 32 bits and can be used to set the state of a pin
-        - For example, we set `GPIOA->ODR` equal to `GPIO_MODER_MODER5_0`, which we showed to expand to be a 1 at the 5th group of 2 bits. 
- 
-# Extra challenges
-1. Roughly double the amount of delay between toggling the led
-2. Change the output pin and create a circuit with your own LED (and resistor) to toggle that LED
-3. Implement an actual delay with the use of the timers. 
+4. Next we setup the basic timer, Timer6
+    - First we must enable the bus that connects to Timer6, which is AHB/APB1.
+        - This info can be found from the [stm32f446re datasheet](https://www.st.com/resource/en/datasheet/stm32f446re.pdf) found in Figure 3 on page 16. 
+    - Next we Set the Prescaler (PSC) and Auto-Reload Register (ARR) values
+        - These values determine the delay between events or when the counter resets (More on these values below)
+    - Then we set the Update Generation (UG) bit in the Event Generation Register (EGR)
+        - This triggers an event to re-initialize the timer count to 0 and apply the set PSC and ARR
+        - So this is done after we've set the PSC and ARR registers
+5. Then we setup the interrupt for the timer
+    - First we enable the DIER (Data Memory Access (DMA) Interuupt Enable Register) Update Interrupt Enable bit
+        - This defines which event triggers the timer 6 interrupt. In our case we want the interrupt to fire on an update which is when the counter reaches an overflow or the value set in ARR. 
+    - Next we enable the Interrupt we want to use. In this case the timer6 interrupt shares an interrupt with the DAC interrupt to save hardware space
+    - This is enabled in the Nested Vectored Interrupt Controller (NVIC), where we set it with the IRQn (Interrupt Request number) and then override the handler by redefining `TIM6__DAC_IRQHandler`
+6. Finally we enable the timer to start counting
+7. Create an infinite loop
