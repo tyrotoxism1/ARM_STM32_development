@@ -1,0 +1,102 @@
+
+obj/startup_STM32F446xE.o:     file format elf32-littlearm
+
+
+Disassembly of section .text:
+
+00000000 <.text>:
+	...
+
+Disassembly of section .text.Reset_Handler:
+
+00000000 <Reset_Handler>:
+.section .text.Reset_Handler
+.weak Reset_Handler
+.type Reset_Handler, %function
+Reset_Handler:
+// Copy the initialized global variables to RAM
+    movs r0, #0
+   0:	2000      	movs	r0, #0
+    ldr  r1, = __data_start
+   2:	490c      	ldr	r1, [pc, #48]	@ (34 <LoopFillZerobss+0x12>)
+    ldr  r2, = __data_end
+   4:	4a0c      	ldr	r2, [pc, #48]	@ (38 <LoopFillZerobss+0x16>)
+    ldr  r3, = __data_flash_start
+   6:	4b0d      	ldr	r3, [pc, #52]	@ (3c <LoopFillZerobss+0x1a>)
+    b    LoopCopyData
+   8:	e002      	b.n	10 <LoopCopyData>
+
+0000000a <CopyData>:
+
+CopyData:
+    ldr  r4, [r3, r0]
+   a:	581c      	ldr	r4, [r3, r0]
+    str  r4, [r1, r0]
+   c:	500c      	str	r4, [r1, r0]
+    adds r0, r0, #4
+   e:	3004      	adds	r0, #4
+
+00000010 <LoopCopyData>:
+
+LoopCopyData:
+    adds r4, r1, r0
+  10:	180c      	adds	r4, r1, r0
+    cmp  r4, r2
+  12:	4294      	cmp	r4, r2
+    bcc  CopyData
+  14:	d3f9      	bcc.n	a <CopyData>
+    cmp  r4, r2
+    bcc  CopyCCMData
+.endif
+
+// Fill uninitialized variables with zeros
+    movs r0, #0
+  16:	2000      	movs	r0, #0
+    ldr  r1, = __bss_start
+  18:	4909      	ldr	r1, [pc, #36]	@ (40 <LoopFillZerobss+0x1e>)
+    ldr  r2, = __bss_end
+  1a:	4a0a      	ldr	r2, [pc, #40]	@ (44 <LoopFillZerobss+0x22>)
+    b    LoopFillZerobss
+  1c:	e001      	b.n	22 <LoopFillZerobss>
+
+0000001e <FillZerobss>:
+
+FillZerobss:
+    str  r0, [r1]
+  1e:	6008      	str	r0, [r1, #0]
+    adds r1, r1, #4
+  20:	3104      	adds	r1, #4
+
+00000022 <LoopFillZerobss>:
+
+LoopFillZerobss:
+    cmp  r1, r2
+  22:	4291      	cmp	r1, r2
+    bcc  FillZerobss
+  24:	d3fb      	bcc.n	1e <FillZerobss>
+
+// Call the system init function
+.ifdef CALL_ARM_SYSTEM_INIT
+    bl   SystemInit
+  26:	f7ff fffe 	bl	0 <SystemInit>
+.endif
+
+// Call the libc init function
+    bl   __libc_init_array
+  2a:	f7ff fffe 	bl	0 <__libc_init_array>
+
+// Call the main function
+    bl   main
+  2e:	f7ff fffe 	bl	0 <main>
+	...
+
+Disassembly of section .text.Default_Handler:
+
+00000000 <ADC_IRQHandler>:
+ * inspection by a debugger.
+ */
+.section .text.Default_Handler, "ax", %progbits
+Default_Handler:
+Infinite_Loop:
+    b    Infinite_Loop
+   0:	e7fe      	b.n	0 <ADC_IRQHandler>
