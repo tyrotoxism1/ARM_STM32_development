@@ -2,7 +2,7 @@
 
 extern "C" {
     void EXTI15_10_IRQHandler(void){
-         // Check if the interrupt was triggered by EXTI line 1
+         // Check if the interrupt was triggered by EXTI line 13
         if (EXTI->PR & EXTI_PR_PR13) {
             // Clear the interrupt pending bit
             EXTI->PR |= EXTI_PR_PR13;
@@ -27,15 +27,10 @@ int main(void) {
     GPIOC->PUPDR &= ~(GPIO_PUPDR_PUPD13); // Clear the PUPDR bits for PC13
     GPIOC->PUPDR |= (GPIO_PUPDR_PUPD13_0);
 
-    // Configure EXTI1 line for PC13
-    // First clear EXTI1 bits
+    // Configure EXTI13 line for PC13
+    // First clear EXTI13 bits
     SYSCFG->EXTICR[3] &= ~(SYSCFG_EXTICR4_EXTI13);
     SYSCFG->EXTICR[3] |= SYSCFG_EXTICR4_EXTI13_PC;
-
-    // Set 2nd bit of the 1st index to configure for PC[x]
-    SYSCFG->EXTICR[1] |=  (1<<2); 
-    //Disable the EXTI Mask for EXTI 1
-    EXTI->IMR |= (1<<1);
 
     // Enable Rising Edge Trigger for PA13
     EXTI->RTSR |= EXTI_RTSR_TR13;
@@ -49,4 +44,5 @@ int main(void) {
 
 
     while (1){
+    }
 }
