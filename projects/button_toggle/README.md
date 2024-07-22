@@ -87,6 +87,6 @@
         - For example, we set `GPIOA->ODR` equal to `GPIO_MODER_MODER5_0`, which we showed to expand to be a 1 at the 5th group of 2 bits. 
  
 # Extra challenges
-1. Roughly double the amount of delay between toggling the led
-2. Change the output pin and create a circuit with your own LED (and resistor) to toggle that LED
-3. Implement an actual delay with the use of the timers. 
+1. Change the trigger from a rising edge to a falling edge
+2. Create a push-button circuit that uses PA1 as the input
+3. Implement button debouncing
