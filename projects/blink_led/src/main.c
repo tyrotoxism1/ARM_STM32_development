@@ -12,6 +12,7 @@ extern "C" {
 
 
 int main(void) {
+//MAking new change from WSL
      // Enable GPIOA clock
     RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;
 
