@@ -1,10 +1,9 @@
 #include "stm32f4xx.h"
-#include <stdio.h>
-#include "UART.c"
+#include "UART_console.h"
 
 
-static const uint32_t PRESCALER = 65535; 
-static const uint32_t AUTORELOAD = 1; 
+static const uint32_t PRESCALER = 15; 
+static const uint32_t AUTORELOAD = 10000; 
 
 volatile uint32_t interrupt_count=0;
 volatile uint32_t timer_arr_index=0;
@@ -23,20 +22,25 @@ extern "C" {
             // Clear the interrupt pending bit
             EXTI->PR |= EXTI_PR_PR9;
 
-
-            interrupt_count++;
+            ++interrupt_count;
             // At first interrupt enable timer
-            if (interrupt_count==1)
+            if (interrupt_count==1){
                 TIM6->CR1 |= TIM_CR1_CEN;
+            }
+
             // The 2nd time the interrupt is called is after 9ms delay and start of 4.5
             else if(interrupt_count==2){
+               TIM6->CR1 &= ~(TIM_CR1_CEN);
                setup_9ms = TIM6->CNT;
+               UART2_Printf("Setup 9s val: %i\r\n", TIM6->CNT); 
                TIM6->CNT = 0;
+               TIM6->CR1 |= TIM_CR1_CEN;
             }
             // This is the end of the setup transmission, store the val, reset counter and stop counter until next interrupt
             else if(interrupt_count==3){
-               setup_4_5ms = TIM6->CNT;
                TIM6->CR1 &= ~(TIM_CR1_CEN);
+               setup_4_5ms = TIM6->CNT;
+               UART2_Printf("Setup 4.5s val: %i\r\n", TIM6->CNT); 
                TIM6->CNT = 0;
             }
             else if(interrupt_count<103){
@@ -50,9 +54,15 @@ extern "C" {
                 else{
                     TIM6->CR1 &= ~(TIM_CR1_CEN);
                     IR_burst_times[timer_arr_index++] = TIM6->CNT;
+                    UART2_Printf("Bit count: %i\r\n", IR_burst_times[timer_arr_index-1]);
                 }
             }
+            // Interrupt count exceeded, reset TIM6 cnt value and interrupt count to setup for next protocol burst
             else{ 
+                //Stop timer
+                TIM6->CR1 &= ~(TIM_CR1_CEN);
+                //Reset timer val
+                TIM6->CNT = 0;
                 interrupt_count=0;
                 // Handle the interrupt (e.g., toggle an LED)
                 GPIOA->ODR ^= GPIO_ODR_OD5;
@@ -107,14 +117,16 @@ void timer6_init(void){
 
 int main(void) {
     interrupt_count=0;
+    UART2_Init();
+    uint32_t count = 0;
 
-    systick_init(16000000/1000);
     GPIO_init();
     EXTI_init();
     timer6_init();
-    uart_init(UART3, 115200);
+    //TIM6->CR1 |= TIM_CR1_CEN;
 
 
     while (1){
+        //UART2_Printf("Timer Val: %i \r\n",TIM6->CNT);
     }
 }
