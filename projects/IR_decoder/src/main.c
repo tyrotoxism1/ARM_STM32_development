@@ -74,7 +74,7 @@ void EXTI9_5_IRQHandler(void){
             GPIOA->ODR ^= GPIO_ODR_OD5;
         }
 
-    }
+}
 
 
 void GPIO_init(void){
