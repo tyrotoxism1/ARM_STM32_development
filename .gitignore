@@ -1,3 +1,4 @@
 **/tags
 tools/bin/arm-none-eabi-gdb
 templates/STM32-base-F4-template
+projects/IR_decoder/.vscode/extensions.json

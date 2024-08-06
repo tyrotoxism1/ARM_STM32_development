@@ -12,15 +12,14 @@ static uint32_t setup_4_5ms;
 //array to hold the difference in times between rise and fall of signal creating 1s and 0s of IR transmissions
 uint32_t IR_burst_times[51] = {0};
 // Controls when timer is counting to determine pulse width within IR transmission
-bool timer_running = 0;
+int timer_running = 0;
 
 
-extern "C" {
-    void EXTI9_5_IRQHandler(void){
-         // Check if the interrupt was triggered by EXTI line 9 
-        if (EXTI->PR & EXTI_PR_PR9) {
-            // Clear the interrupt pending bit
-            EXTI->PR |= EXTI_PR_PR9;
+void EXTI9_5_IRQHandler(void){
+        // Check if the interrupt was triggered by EXTI line 9 
+    if (EXTI->PR & EXTI_PR_PR9) {
+        // Clear the interrupt pending bit
+        EXTI->PR |= EXTI_PR_PR9;
 
             ++interrupt_count;
             // At first interrupt enable timer
@@ -69,8 +68,13 @@ extern "C" {
             }
 
         }
-    } 
-}
+        else{ 
+            interrupt_count=0;
+            // Handle the interrupt (e.g., toggle an LED)
+            GPIOA->ODR ^= GPIO_ODR_OD5;
+        }
+
+    }
 
 
 void GPIO_init(void){
