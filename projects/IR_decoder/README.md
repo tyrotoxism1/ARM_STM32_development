@@ -1,35 +1,77 @@
-# button\_toggle Overview
-- This project transitions from internally creating interrupts, like the [[../blink_led]] project, to now having external interrupts
-- This project uses the user button on the STM32F4 development board that when pressed, triggers an interrupt that toggles an LED.
-- This project shows how to:
-    - Setup GPIO for input
-    - Setup the external interrupts for ARM controllers
-    - Connect/map the external interrupt to the desired port
-    - trigger an interrupt using rising edge
+# IR(Infrared) Decoder Overview
+- This project tackles decoding and processing an IR signal from an IR remote using the NEC/Japanese protcol 
+- The project utilizes the following:
+    - Timer counter with rising and falling edge triggered interrupts to handle timing for decoding transmission bits
+    - State machine to manage protocol decoder state
+    - PWM Input Caputure mode
+    - GPIO input 
 
-
+# TODO
+- [ ] Implement basic that is around 100ms and we start the timer upon recieving signal, then reset `interrupt_count` and varibles like that after completion of the timer
+    - This avoids if other IR remotes mess with our stuff we can recover
 # Program Flow
-1. Enable GPIO, EXTI and timer
-2. Wait for 
-    - This keeps the internal logic and operations of the peripheral devices, such as GPIO or UART, synchronized
-3. Configure Port A pin 5 as output
-    - Each pin has 2 bits in the MODER for setting the type
-        - `00` = Input
-        - `01` = Output
-        - `10` = Alternate function
-        - `11` = Analog Mode   
-    - This pin is connected to LD2 as described in [Nucleo STM32 User Manual](https://www.st.com/resource/en/user_manual/um1724-stm32-nucleo144-boards-mb1137-stmicroelectronics.pdf) in section 6.4 *LEDs*(page 23). 
-4. Configure Port C pin 13 as input
-    - This pin is connected to the user push button as described in [Nucleo STM32 User Manual](https://www.st.com/resource/en/user_manual/um1724-stm32-nucleo144-boards-mb1137-stmicroelectronics.pdf) in section 6.5 *Push-buttons*(page 23).
-5. Set the push-button to use a pull-up resistor
-    - The pull-up resistor sets the default state of the push-button to HIGH when not pressed
-        - More on this in **Rise/Fall Trigger** section below
-6. Connect the external interrupt 13 line to port C pin 13
-7. Configure the trigger for the external interrupt 13 to be from the rising edge
-8. Enable the interrupt handler
-9. Loop infinitely until an interrupt occurs
 
 # Design Notes
+
+## Brain Dump (8/14/24 3:51 PM)
+Ok so here's the plan:
+1. We are going to just have one timer running for about 105ms (the length of one transmission), we have a single bit getting flipped to determine if the incoming interrupt trigger was from rising to logic high or falling to logic low
+    - So initially during the 9ms setup, the trigger is a falling edge but the 9ms ends at the rising edge. 
+2. While the timer is running, we start it immedietly when the first trigger happens and intially capture the starting cnt value, we don't start toggling the rising and falling until the 9ms is set and the next timer is either 4.5 or 2.5
+3. Once the setup has been captured,  we can use the state machine value to enter a state of either data processing or repeat (the FMS should be in the setup state before hand)
+    - This means we'll have a case statement in the interrupt handler which hopefully isn't too bad
+    - It would only be one case statement that checks the current state
+4. If we are in data processing state then we begin toggling `edge_tracker` keeping track of rising and falling. 
+    - If `edge_tracker` is 1, it's risen and would in theory read a logic HIGH value from the IR sesnor input
+    - If `edge_tracker` is 0, it's fallen and the IR sesnor would read at logic LOW value
+    - Thus, if `edge_tracker` is 1 that indicates the begginning of a pulse and shall capture the value of the current timer cnt
+    - If `edge_tracker` is 0, indicating end of pulse, we can just evaluate if the current cnt is within a range of 2.25 or 1.125 and bit shift a 1 or a 0 into a buffer for the incoming IR command based on the timer difference measured. 
+5. The timer should be setup to overflow and interrupt the program to reset values. 
+
+## Keep interrupt handler short and sweet
+- It's vital to keep the interrupt handler short otherwise while handling the interrupt, another interrupt might trigger, meaning the handling won't complete
+    - I ran into this problem trying to use my crappy UART printf function to debug but caused tons of problems.
+- Especifally as the data bits are being processed, the interrupts are triggered nearly every 3-5ms 
+- This forced me from handling all the setup and data bits, which included starting, stopping the timer, capturing the counter value, storing the value etc, to now having more a state machine approach
+    - Now the setup is detected from the inital falling edge of the IR sensor, then that transitions the program into the IR_STATE_DATA bits where the main loop handles the data bit processing
+
+
+## Edge Detection Cases
+- During a normal single command transmission, the IR receiver recieves the inital falling edge for the 9ms setup, then rises and falls 99 more times 
+    - This includes the falling edge to start the 9ms setup and the returning rising edge from the last bit to the idle logic HIGH state.
+- However, there is also a repeat command which has 4 rise and falls, starting with 9ms logic LOW
+## Implement Timer 
+## Input Mode Doesn't Work
+- To enable PWM input mode we need to set PA9 (used as the input of the IR sensor) to Alternate Function 3 (AF3) to connect to Timer Input (TI1) for timer 9. 
+    - This ruins input capture and reading the value since PA9 becomes a peripheral to timer 9 controller
+    - We also can't just use the PWM input mode since the RES IR protocol starts with a 9ms logic LOW immedietly followed by a 4.5 logic HIGH which are pulses thus can't be measured. 
+- Some work arounds could be:
+    - Going back to manually controlling the timer based on the incoming protocol.
+        - I'm likely going to go with this as I already have progress of connecting the interrupt to the rise and fall edges of the protocol, just need to get the setup and repeat sections of the protocol locked down.
+    - connecting the sensor to two pins, one for the alternate function and one to the normal input, but that seems like a mess betwween synchronizing those inputs and taking action acreoss
+## 
+
+## PWM Input Mode :x:
+### Overview
+- PWM input mode is a variation of input capture mode
+- PWM input mode has two input capture signals connected to the timer input
+    - The signals trigger on opposite polarity edges
+### Setup/Important Registers
+- **TIMx_CCMR1** (Timer Caputre/Compare Mode Register): Found in section 18.4.6, this register sets the mode (input, output, PWM) of channel 1 and 2 for a timer
+    - **CC1S** (Caputre/Compare 1 Selection) = `0b01`. This configures channel 1 as input and maps Input Capture 1 (IP1) to Timer Input 1 (TI1)
+    - **CC2S** (Caputre/Compare 2 Selection) = `0b10`. This configures channel 2 as input and maps Input Capture 2 (IP2) to Timer Input 1 (TI1)
+- **TIMx_CCER** (Timer Caputre/Compare Enable Register): Found in section 18.4.7, this register enables channels and configuring the channels as input or output and when to what polarity of the signal edge to capture on
+    - **CC1P** (Capture/Compare 1 Polarity) = `0b0`. Refer to CC1NP description below
+    - **CC1NP** (Caputre/Compare 1 Complementary Polarity) = `0b0`. Clearing CC1P and CC1NP sets the active polarity for the Timer Input 1 Filter Pin 1 (TI1FP1) to the rising edge
+    - **CC2P** = `0b1`. Refer to CC2NP description below
+    - **CC2NP** = `0b1`. Same as CC1P and CC1NP however is activated on the falling edge
+- **TIMx_SMCR** (Timer Slave Mode Control Register): Found in section 18.4.2, the register configures the trigger input (internal trigger, TI edge detector or Filtered timer input) and what the trigger does (such as reset counter) 
+    - **TS** (Trigger Selection) = `0b101`. This selects the Timer Input Filtered Pin 1 as the trigger input 
+    - **SMS** (Slave Mode Select) = `0b100`. When the external signals are selected on a rising edge, the counter is reinitialized and the registers are updated
+- **TIMx_CCER** (Timer Capture/Compare Enable Register): Found in section 18.4.7, the register bits are used to enable polarities and capture/compare outputs
+    - **CC1E** (Capture/Compare 1 Enable) = `0b1`. Capture 1 is enabled 
+    - **CC2E** (Capture/Compare 2 Enable) = `0b1`. Capture 2 is enabled 
+
 ## Flow of triggers from IR protocol
 - We want to store the timings of bursts in the IR transmissions into an array.
     - To do this, we can have seperate variables for storing the timings of the start transmission and the rest of the bits
@@ -43,6 +85,10 @@
 
  
 # Abbreviation Breakdown (incomplete)
+- ICx => Input Capture. The `x` referes to the capture channels, typically being 1 or 2. 
+- TIxFP => Timer Input Filtered Pin. 
+
+
 - RCC => Reset and Clock Control 
     - This module is used to enable/disable clock signals sent to different peripherals
 - AHB1ENR => Advanced High-Performance Bus 1 Enable Register
