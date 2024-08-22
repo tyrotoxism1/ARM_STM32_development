@@ -90,6 +90,12 @@ void UART2_Printf(const char* fmt, ...) {
                     UART2_WriteString(buffer);
                     break;
                 }
+                case 'b': { // Binary
+                    unsigned int num = va_arg(args, unsigned int);
+                    snprintf(buffer, sizeof(buffer), "%032b", num);
+                    UART2_WriteString(buffer);
+                    break;
+                }
                 default: { // Unknown specifier
                     UART2_Write('%');
                     UART2_Write(*ptr);
