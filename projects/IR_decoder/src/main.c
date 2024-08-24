@@ -47,7 +47,7 @@ static uint32_t setup_9ms=0;
 static uint32_t setup_4_5ms=0;
 //array to hold the differoence in times between rise and fall of signal creating 1s and 0s of IR transmissions
 //32 data bits are being sent
-uint32_t IR_burst_times[48] = {0};
+uint32_t IR_burst_times[49] = {0};
 
 
 
@@ -104,6 +104,24 @@ void timer6_init(void){
     //NVIC_SetPriority(TIM6_DAC_IRQn, 1);
 }
 
+void timer2_init(void){
+    // Enable TIM6 clock
+    RCC->APB1ENR |= RCC_APB1ENR_TIM2EN;
+    // Setup counter values
+    TIM2->CR1 &= ~TIM_CR1_CEN;
+    TIM2->PSC = PRESCALER;
+    TIM2->ARR = 104999;
+    TIM2->EGR = TIM_EGR_UG;
+    UART2_Printf("ARR: %i,   PRE: %i\r\n", TIM2->ARR, TIM2->PSC);
+    UART2_Printf("CR1: %b \r\n", TIM2->CR1);
+    NVIC_EnableIRQ(TIM2_IRQn);
+    //Enable the update/overflow interrupt
+    TIM2->DIER |= TIM_DIER_UIE;
+    GPIOA->ODR &= ~(GPIO_ODR_OD5);
+    // Update and apply settings
+    //NVIC_SetPriority(TIM6_DAC_IRQn, 1);
+}
+
 /*
 Calling a function could be too slow of a transition due to the context switch and could be better
 to do inline function or just processing data within the main while loop  
@@ -114,15 +132,29 @@ void process_data(void){
     return;
 }
 
-void TIM6_DAC_IRQ(void){
-    if(TIM6->SR & TIM_SR_UIF){
-        GPIOA->ODR ^= GPIO_ODR_OD5;
-        TIM6->SR &= ~(TIM_SR_UIF);
-        //UART2_Printf("Timer Window Completed\r\n");
-    }
-}
+
 
 extern "C" {
+    void TIM6_DAC_IRQ(void){
+        if(TIM6->SR & TIM_SR_UIF){
+            GPIOA->ODR ^= GPIO_ODR_OD5;
+            TIM6->SR &= ~(TIM_SR_UIF);
+            //UART2_Printf("Timer Window Completed\r\n");
+        }
+    }
+
+    void TIM2_IRQHandler(void){
+        if(TIM2->SR & TIM_SR_UIF){
+            GPIOA->ODR |= (GPIO_ODR_OD5);
+            //GPIOA->ODR ^= GPIO_ODR_OD5;
+            TIM2->SR &= ~(TIM_SR_UIF);
+            UART2_Printf("In Timer 2 interrupt!\r\n");
+            // Reinstate EXTI9 interrupt in case error occured during transmission 
+            // Everything else(TIM2 count, FSM state, etc, should've beeen reset in ERROR state
+            NVIC_EnableIRQ(EXTI9_5_IRQn);
+        }
+    }
+
     void EXTI9_5_IRQHandler(void){
         // Check if the interrupt was triggered by EXTI line 9 
         if (EXTI->PR & EXTI_PR_PR9) {
@@ -138,12 +170,12 @@ extern "C" {
                     //Set FSM to setup1
                     curr_ir_state = IR_STATE_SETUP_1;
                     //reset and start counter 
-                    TIM6->CNT = 0; 
-                    TIM6->CR1 |= TIM_CR1_CEN;
+                    TIM2->CNT = 0; 
+                    TIM2->CR1 |= TIM_CR1_CEN;
                     break;
                 case IR_STATE_SETUP_1:
                     //capture counter value
-                    setup_9ms = TIM6->CNT;
+                    setup_9ms = TIM2->CNT;
                     //if cnt is 9ms enter second setup
                     if(setup_9ms>LOW_9MS_RANGE && setup_9ms<HIGH_9MS_RANGE)
                         curr_ir_state = IR_STATE_SETUP_2;
@@ -154,7 +186,7 @@ extern "C" {
                     break;
                 case IR_STATE_SETUP_2:
                     //Capture difference between previous counter value from IR_STATE_SETUP_1 and new capture
-                    setup_4_5ms = (TIM6->CNT) - setup_9ms;
+                    setup_4_5ms = (TIM2->CNT) - setup_9ms;
                     //If value is around 4500 
                     if(setup_4_5ms>LOW_4_5MS_RANGE && setup_4_5ms<HIGH_4_5MS_RANGE){
                         //set FSM to PROCESS_DATA
@@ -183,7 +215,7 @@ extern "C" {
                      * is just to ensure if some pusle was missed, the FSM can return to a known state and 
                      * reset.
                      */
-                    process_data_timer_capture = TIM6->CNT;
+                    process_data_timer_capture = TIM2->CNT;
                     if(timer_arr_index >= 48){
                         curr_ir_state = IR_STATE_COMPLETE;
                         timer_arr_index = 0;
@@ -192,13 +224,17 @@ extern "C" {
                     curr_ir_state = IR_STATE_PROCESS_FALL;
                     break;
                 case IR_STATE_PROCESS_FALL:
-                    IR_burst_times[++timer_arr_index] = TIM6->CNT; //- process_data_timer_capture; 
+                    IR_burst_times[++timer_arr_index] = TIM2->CNT - process_data_timer_capture; 
                     //GPIOA->ODR ^= GPIO_ODR_OD5;
                     curr_ir_state = IR_STATE_PROCESS_RISE;
                     break;
                 case IR_STATE_ERROR:
-                    setup_4_5ms, setup_9ms, TIM6->CNT = 0;
-                    TIM6->CR1 &= ~(TIM_CR1_CEN);
+                    NVIC_DisableIRQ(EXTI9_5_IRQn);
+                    setup_4_5ms, setup_9ms= 0; //, TIM2->CNT 
+                    //TIM2->CR1 &= ~(TIM_CR1_CEN);
+                    // Disable the EXTI9 interrupt to allow the system to recover and ignore 
+                    // incoming tranmission, the EXTI9 is reinstated after TIM2 interrupt occurs
+                    // which is 105ms from the start of the transmission. 
                     curr_ir_state = IR_STATE_IDLE;
                     UART2_Printf("ERROR: %i\r\n", curr_ir_error);
                     curr_ir_error = ERROR_NONE;
@@ -217,9 +253,15 @@ extern "C" {
 }
 
 void execute_command(){
-    for(int i = 1; i<48; i++){
-        UART2_Printf("Val %i: %i\t",i,IR_burst_times[i]);
-        if(i%5==0)
+    for(int i = 1; i<=48; i++){
+        // If around 1600 uS, then received a `1` value
+        if(IR_burst_times[i]>1400 && IR_burst_times[i]<1800)
+            UART2_Printf("1 ");
+        else if(IR_burst_times[i]>300 && IR_burst_times[i]<800) 
+            UART2_Printf("0 ");
+        else
+            UART2_Printf("%i ", IR_burst_times[i]);
+        if(i%8==0)
             UART2_Printf("\r\n");
     }
     UART2_Printf("\r\n");
@@ -233,9 +275,10 @@ int main(void) {
 
     GPIO_init();
     EXTI_init();
-    timer6_init();
+    //timer6_init();
+    timer2_init();
+    NVIC_EnableIRQ(EXTI9_5_IRQn);
     GPIOA->ODR &= ~(GPIO_ODR_OD5);
-    NVIC_EnableIRQ(TIM6_DAC_IRQn);
     //TIM6->CR1 |= TIM_CR1_CEN;
 
 
@@ -243,7 +286,7 @@ int main(void) {
         //UART2_Printf("IR complete: %s\r\n",IR_burst_complete?"True":"False");
         //UART2_Printf("Interrupt Count: %i\r\n", interrupt_count);
         if(curr_ir_state!=0)
-            UART2_Printf("IR State: %i, CNT: %i\r\n", curr_ir_state, TIM6->CNT );
+            UART2_Printf("IR State: %i, CNT: %i\r\n", curr_ir_state, TIM2->CNT );
         //GPIOA->ODR |= GPIO_ODR_OD5;
         switch(curr_ir_state){
             //While processing data
@@ -258,12 +301,12 @@ int main(void) {
                 //Reset the IR burst variables
                 curr_ir_state = IR_STATE_IDLE;
                 timer_arr_index=0;
-                TIM6->CR1 &= ~(TIM_CR1_CEN);
-                TIM6->CNT = 0;
+                TIM2->CR1 &= ~(TIM_CR1_CEN);
                 //GPIOA->ODR ^= GPIO_ODR_OD5;
                 //Re enable EXTI9 interrupt
-                UART2_Printf("IR burst complete\r\n");
+                UART2_Printf("IR burst complete, CNT: %i\r\n", TIM2->CNT);
                 UART2_Printf("9ms val: %i\t4.5ms val: %i\r\n", setup_9ms, setup_4_5ms);
+                TIM2->CNT = 0;
                 execute_command();
                 // Clear any pending interrupt bits
                 EXTI->PR |= EXTI_PR_PR9;
