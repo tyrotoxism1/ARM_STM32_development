@@ -50,6 +50,7 @@ static uint32_t setup_4_5ms=0;
 //array to hold the differoence in times between rise and fall of signal creating 1s and 0s of IR transmissions
 //32 data bits are being sent
 uint32_t IR_burst_times[49] = {0};
+volatile uint32_t interrupt_timing = 0;
 
 
 
@@ -62,8 +63,8 @@ void GPIO_init(void){
     // Enable the system configuration controller
     RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
 
-    // Set PA5,6 and 7 as output
-    GPIOA->MODER |= GPIO_MODER_MODE5_0 | GPIO_MODER_MODE6_0 | GPIO_MODER_MODE7_0;
+    // Set PA5,6,7 and 8 as output
+    GPIOA->MODER |= GPIO_MODER_MODE5_0 | GPIO_MODER_MODE6_0 | GPIO_MODER_MODE7_0 | GPIO_MODER_MODE8_0;
     // Set PA9 as input by clearing both mode bits 
     GPIOA->MODER &= ~(GPIO_MODER_MODE9);
     // Configure pull down for PA9 (pull down is set with `0b10` in the PUPDR)  
@@ -97,9 +98,6 @@ void timer6_init(void){
     TIM6->CR1 &= ~TIM_CR1_CEN;
     TIM6->PSC = PRESCALER;
     TIM6->ARR = 104999;
-    TIM6->EGR = TIM_EGR_UG;
-    UART2_Printf("ARR: %i,   PRE: %i\r\n", TIM6->ARR, TIM6->PSC);
-    UART2_Printf("CR1: %b \r\n", TIM6->CR1);
     //Enable the update/overflow interrupt
     //TIM6->DIER |= TIM_DIER_UIE;
     // Update and apply settings
@@ -136,16 +134,20 @@ extern "C" {
 
     void TIM2_IRQHandler(void){
         if(TIM2->SR & TIM_SR_UIF){
+            GPIOA->ODR |= GPIO_ODR_OD8;
             TIM2->SR &= ~(TIM_SR_UIF);
+            curr_ir_state = IR_STATE_IDLE;
             //GPIOA->ODR |= (GPIO_ODR_OD5);
             //UART2_Printf("In Timer 2 interrupt! %i \r\n", TIM2->CNT);
             if(curr_ir_error!= ERROR_NONE) 
                 UART2_Printf("ERROR: %i\r\n", curr_ir_error);
+            curr_ir_error = ERROR_NONE;
             //GPIOA->ODR &= ~(GPIO_ODR_OD5);
             TIM2->CR1 &= ~(TIM_CR1_CEN);
             TIM2->CNT = 0;
             // Reinstate EXTI9 interrupt in case error occured during transmission 
             // Everything else(TIM2 count, FSM state, etc, should've beeen reset in ERROR state
+            GPIOA->ODR &= ~(GPIO_ODR_OD8);
             NVIC_EnableIRQ(EXTI9_5_IRQn);
         }
     }
@@ -153,9 +155,9 @@ extern "C" {
     void EXTI9_5_IRQHandler(void){
         // Check if the interrupt was triggered by EXTI line 9 
         if (EXTI->PR & EXTI_PR_PR9) {
+        TIM6->CNT = 0;
+        TIM6->CR1 |= TIM_CR1_CEN;
             // Clear the interrupt pending bit, this might need to be done when interrupt is done and not immedietly
-            //Temp clearing pending bit so interrupt can try to finish
-            EXTI->PR |= EXTI_PR_PR9;
             
             switch (curr_ir_state){
                 case IR_STATE_IDLE:
@@ -167,6 +169,8 @@ extern "C" {
                     TIM2->CR1 |= TIM_CR1_CEN;
                     //GPIOA->ODR |= GPIO_ODR_OD5;
                     //GPIOA->ODR |= GPIO_ODR_OD5;
+                    TIM6->CR1 &= ~(TIM_CR1_CEN);
+                    interrupt_timing = TIM6->CNT;
                     break;
                 case IR_STATE_SETUP_1:
                     //capture counter value
@@ -234,22 +238,24 @@ extern "C" {
                     //UART2_Printf("REPEATE\r\n");
                     break;
                 case IR_STATE_ERROR:
+                    GPIOA->ODR |= GPIO_ODR_OD8;
                     //Disable EXTI9 to ignore rest of transmission until timer resets FSM and transmission tracking 
                     NVIC_DisableIRQ(EXTI9_5_IRQn);
                     //clear any captured values used for setup timing or other timing vars
                     setup_4_5ms, setup_9ms= 0; //, TIM2->CNT 
                     curr_ir_state = IR_STATE_IDLE;
-                    curr_ir_error = ERROR_NONE;
                     //reset FSM to IDLE
                     //If timer isn't running(for whatever reason), we don't need to do anything extra 
                     break;
                 default:
                     curr_ir_state = IR_STATE_IDLE;
                     break;
-            }
-        }
+            } //End of swtich statement
+            //Temp clearing pending bit so interrupt can try to finish
+            EXTI->PR |= EXTI_PR_PR9;
+        } //End of if statement checking EXTI9 flag
     } 
-}
+} //End of `extern C`
 
 void parse_transmission(uint8_t* address_low, uint8_t* address_high, uint8_t* command){
     for(int i = 1; i<=48; i++){
@@ -314,34 +320,43 @@ int main(void) {
 
     GPIO_init();
     EXTI_init();
-    //timer6_init();
+    timer6_init();
     timer2_init();
     NVIC_EnableIRQ(EXTI9_5_IRQn);
     TIM2->CNT = 0;
-    TIM2->CR1 |= TIM_CR1_CEN;
-    //GPIOA->ODR &= ~(GPIO_ODR_OD5);
     GPIOA->ODR |= GPIO_ODR_OD5 | GPIO_ODR_OD6 | GPIO_ODR_OD7;
+    GPIOA->ODR &= ~(GPIO_ODR_OD8);
 
     while (1){
-        //UART2_Printf("IR complete: %s\r\n",IR_burst_complete?"True":"False");
-        //UART2_Printf("Interrupt Count: %i\r\n", interrupt_count);
         if(curr_ir_state!=0)
             UART2_Printf("IR State: %i, CNT: %i\r\n", curr_ir_state, TIM2->CNT );
         //GPIOA->ODR |= GPIO_ODR_OD5;
         switch(curr_ir_state){
+            // If the counter is not running and the FSM is stuck in SETUP, reset back to IDLE
+            // This often happens when spamming the buttons and holding long enough for the remote to send
+            // a repeat transmission where the repeat signal gets messed up, leaving the FSM in setup
             //In Complete state, reset interrupt_count, set command buffer...
+            case IR_STATE_SETUP_1:
+                //GPIOA->ODR |= GPIO_ODR_OD8;
+                if(TIM2->CR1 & (~TIM_CR1_CEN)){
+                   GPIOA->ODR ^= GPIO_ODR_OD8;
+                    curr_ir_state = IR_STATE_IDLE;
+                    TIM2->CNT = 0;
+                }
+                //GPIOA->ODR &= GPIO_ODR_OD8;
+                break;
             case IR_STATE_COMPLETE:
                 // Disable interrupts until the desired command execution is complete 
                 NVIC_DisableIRQ(EXTI9_5_IRQn);
                 //Reset the IR burst variables
                 curr_ir_state = IR_STATE_IDLE;
                 timer_arr_index=0;
-                //TIM2->CR1 &= ~(TIM_CR1_CEN);
+                TIM2->CR1 &= ~(TIM_CR1_CEN);
                 //GPIOA->ODR ^= GPIO_ODR_OD5;
                 //Re enable EXTI9 interrupt
                 //UART2_Printf("IR burst complete, CNT: %i\r\n", TIM2->CNT);
                 //UART2_Printf("9ms val: %i\t4.5ms val: %i\r\n", setup_9ms, setup_4_5ms);
-                //TIM2->CNT = 0;
+                TIM2->CNT = 0;
                 parse_transmission(&address_low, &address_high, &command);
                 execute_command(command);
                 // Clear any pending interrupt bits
@@ -360,7 +375,8 @@ int main(void) {
                     curr_ir_error = ERROR_NONE;
                     //reset FSM to IDLE
                     //If timer isn't running(for whatever reason), we don't need to do anything extra 
-                    break;        }
+                    break;        
+        }
 
     }
 }
