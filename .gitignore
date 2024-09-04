@@ -1,3 +1,5 @@
 **/tags
 tools/bin/arm-none-eabi-gdb
 templates/STM32-base-F4-template
+projects/IR_decoder/bin/stm32_bin_image.bin
+projects/IR_decoder/bin/stm32_executable.elf

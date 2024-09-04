@@ -3,13 +3,52 @@
 - The project utilizes the following:
     - Timer counter with rising and falling edge triggered interrupts to handle timing for decoding transmission bits
     - State machine to manage protocol decoder state
-    - PWM Input Caputure mode
     - GPIO input 
+
+## Decoder State Machine
+- The IR decoder uses a state machine to manage what the processor is doing at any given point
+- The state are:
+    - `IR_STATE_IDLE` = 0 
+    - `IR_STATE_SETUP_1` = 1
+    - `IR_STATE_SETUP_2` = 2
+    - `IR_STATE_REPEAT` = 3
+    - `IR_STATE_PROCESS_RISE` = 4
+    - `IR_STATE_PROCESS_FALL` = 5
+    - `IR_STATE_ERROR` = 6
+    - `IR_STATE_COMPLETE` = 7
+- Below is the diagram showing the different states and how the state machine manages states
+![alt text](IR_decoder_FSM.png "IR Decoder FSM Diagram")
+- It's important to note that the program FSM current state doesn't execute the corresponding state actions or checks until the next interrupt.
+  - For example, at startup, the current state is IDLE, if an interrupt occurs the current state is set to SETUP_1 but does not execute the SETUP_1 checks until the next interrupt. 
+- Another note is that the timer 2 prescalar value is set to 15 so that with the default 16MHz clock speed the counter counts about 1 count per 1 microsecond
+  - This means that if the counter value is 1000, 1 milisecond has passed
+### Walking through FSM States and Transitions
+- The FSM will always start in IDLE state and only leave that state if the EXTI9 interrupt line is triggered
+- Once a trigger occurs, the program enters the `IR_STATE_IDLE` case statement, where the FSM is set to SETUP_1 and starts the timer 2 counter used throughout a transmission frame for timing of pulse widths and a reset if the transmission goes beyond the frame timing or an error occurs
+- Upon the next interrupt, the counter value is checked
+  - If the value is around 9000 (given +-500 for margin of error) the state enters setup 2
+  - If the value is not within the margin of error, the state is set to ERROR
+    - After the TIM2 gets to the reset period value(a bit longer than a single IR transmission frame), the FSM is reset back to IDLE and all transmission value are reset
+- In SETUP_2, a similiar process to SETUP_1 occurs and checks if the time between setups is around 4500 (Again with +-500 MoE) or 2250 (with 250 MoE).
+  - If the setup 2 time is with 4500 range, the state is set to PROCESS_RISE
+  - If the setup 2 time is within 2250 range then the state is set to REPEAT
+  - Otherwise the state is set to ERROR
+- The FSM enters data processing when first set to PROCESS_RISE. 
+  - In this state the program captures the current value of timer 2 for reference then checks if `timer_arr_index` is greather than or equal to 48
+  - As the state name suggests this check occurs during the rising edge of the IR transmission and the start of the bit timing 
+    - The `timer_arr_index` keeps track of pulse width timings of each data bit in an array
+    - Since the transmission will send 48 bits in total, once the index reaches 48 the transmission is complete and enters the COMPLETE state
+  - If the `timer_arr_index` is less than 48, then the FSM enters PROCESS_FALL 
+- In the PROCESS_FALL state and on the falling edge of the IR tranmsission the program captures the pulse width timing then checks if it's around 1400 (meaning logic 1 recieved) or around 700 (meaning logic 0 received), otherwise an error has occured and FSM is set to ERROR
+- When the FSM has processed all 48 bits, the FSM is set to COMPLETE. Within the main loop, the program polls the state of the FSM.
+  - If the state is COMPLETE, the EXTI is disabled to allow the necessary execution correspodning to the command to occur without disruption
+    - Once the command execution is complete the EXTI is re-enabled 
 
 # TODO
 - [ ] Implement basic that is around 100ms and we start the timer upon recieving signal, then reset `interrupt_count` and varibles like that after completion of the timer
     - This avoids if other IR remotes mess with our stuff we can recover
 # Program Flow
+- 
 
 # Design Notes
 
@@ -35,21 +74,6 @@ Ok so here's the plan:
 - This forced me from handling all the setup and data bits, which included starting, stopping the timer, capturing the counter value, storing the value etc, to now having more a state machine approach
     - Now the setup is detected from the inital falling edge of the IR sensor, then that transitions the program into the IR_STATE_DATA bits where the main loop handles the data bit processing
 
-
-## Edge Detection Cases
-- During a normal single command transmission, the IR receiver recieves the inital falling edge for the 9ms setup, then rises and falls 99 more times 
-    - This includes the falling edge to start the 9ms setup and the returning rising edge from the last bit to the idle logic HIGH state.
-- However, there is also a repeat command which has 4 rise and falls, starting with 9ms logic LOW
-## Implement Timer 
-## Input Mode Doesn't Work
-- To enable PWM input mode we need to set PA9 (used as the input of the IR sensor) to Alternate Function 3 (AF3) to connect to Timer Input (TI1) for timer 9. 
-    - This ruins input capture and reading the value since PA9 becomes a peripheral to timer 9 controller
-    - We also can't just use the PWM input mode since the RES IR protocol starts with a 9ms logic LOW immedietly followed by a 4.5 logic HIGH which are pulses thus can't be measured. 
-- Some work arounds could be:
-    - Going back to manually controlling the timer based on the incoming protocol.
-        - I'm likely going to go with this as I already have progress of connecting the interrupt to the rise and fall edges of the protocol, just need to get the setup and repeat sections of the protocol locked down.
-    - connecting the sensor to two pins, one for the alternate function and one to the normal input, but that seems like a mess betwween synchronizing those inputs and taking action acreoss
-## 
 
 ## PWM Input Mode :x:
 ### Overview
@@ -113,7 +137,3 @@ Ok so here's the plan:
     - Each GPIO has its own ODR, where each ODR is 32 bits and can be used to set the state of a pin
         - For example, we set `GPIOA->ODR` equal to `GPIO_MODER_MODER5_0`, which we showed to expand to be a 1 at the 5th group of 2 bits. 
  
-# Extra challenges
-1. Change the trigger from a rising edge to a falling edge
-2. Create a push-button circuit that uses PA1 as the input
-3. Implement button debouncing
