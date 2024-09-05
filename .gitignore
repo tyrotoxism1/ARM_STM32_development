@@ -5,3 +5,8 @@ templates/STM32-base-F4-template
 projects/IR_decoder
 projects/blink_led
 projects/button_toggle
+projects/servo_controller/obj/startup_STM32F446xE.o
+projects/servo_controller/bin/stm32_bin_image.bin
+projects/servo_controller/STM32-base-STM32Cube
+projects/servo_controller/STM32-base
+projects/servo_controller/bin/stm32_executable.elf
