@@ -1,8 +1,17 @@
 #include "stm32f4xx.h"
+#include "UART.h"
+
+
+typedef enum{
+    //Waiting for state to change
+    WAITING = 0,
+    BUTTON_DOWN,
+    BUTTON_UP
+} BUTTON_STATE;
 
 void GPIO_init(void){
-    // Enable GPIOA clock
-    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;  
+    // Enable GPIOA and B clock
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN | RCC_AHB1ENR_GPIOBEN;  
     // Set PA5 to alternate function 
     GPIOA->MODER |= GPIO_MODER_MODE5_1;   
     // Set PA6 to output mode
@@ -11,10 +20,10 @@ void GPIO_init(void){
     GPIOA->AFR[0] |= GPIO_AFRL_AFRL5_0;
 
     //Set PB4 & 5 to input for pushbuttons
-    GPIOB->MODER &= ~(GPIO_MODER_MODE4 | GPIO_MODER_MODE5);
+    GPIOB->MODER &= ~(GPIO_MODER_MODE4); 
+    GPIOB->MODER &= ~(GPIO_MODER_MODE5);
     //Configure pull up for pin 4 and 5
-    GPIOB->PUPDR &= ~(GPIO_PUPDR_PUPD4 |GPIO_PUPDR_PUPD5);
-    
+    //GPIOB->PUPDR &= ~(GPIO_PUPDR_PUPD4_0 | GPIO_PUPDR_PUPD5_0); 
     return;
 }
 
@@ -39,15 +48,29 @@ void timer2_pwm_init(void){
 }
 
 int main(void) {
+    uint8_t button_down = 0;
+    BUTTON_STATE button_state = WAITING;
     // Initialization code
+    UART2_Init();
     GPIO_init();
     timer2_pwm_init();
+    GPIOA->ODR &= ~GPIO_ODR_OD6;
+    UART2_Printf("MODER: %x\r\n",GPIOB->MODER);
     while (1) {
-        if(!(GPIOB->IDR & GPIO_IDR_ID4)){
+        button_down = (!(GPIOB->IDR & GPIO_IDR_ID4))?1:0;
+        //If in waiting state and the button is pressed, we turn the LED on and enter the BUTTON_DOWN state
+        if(((button_state==WAITING) || button_state==BUTTON_UP) && button_down){
             GPIOA->ODR |= GPIO_ODR_OD6;
+            button_state = BUTTON_DOWN;
         }
-        else{
+        //If the button state is BUTTON_DOWN but the button is actually up,
+        //turn the LED off and enter state BUTTON_UP
+        else if(button_state==BUTTON_DOWN && !button_down){
             GPIOA->ODR &= ~GPIO_ODR_OD6;
+            button_state = BUTTON_UP;
         }
+        //Otherwise default to WAIITNG state 
+        else
+            button_state = WAITING; 
     }
 }
