@@ -59,7 +59,7 @@ extern "C" {
             //UART2_Printf("In Timer 2 interrupt! %i \r\n", TIM2->CNT);
             if(curr_ir_error!= ERROR_NONE) 
                 //UART2_Printf("ERROR: %i\r\n", curr_ir_error);
-            curr_ir_error = ERROR_NONE;
+                curr_ir_error = ERROR_NONE;
             //GPIOA->ODR &= ~(GPIO_ODR_OD5);
             TIM2->CR1 &= ~(TIM_CR1_CEN);
             TIM2->CNT = 0;
@@ -73,7 +73,6 @@ extern "C" {
     void EXTI9_5_IRQHandler(void){
         // Check if the interrupt was triggered by EXTI line 9 
         if (EXTI->PR & EXTI_PR_PR9) {
-            UART2_Printf("In EXTI\r\n");
             // Clear the interrupt pending bit 
             EXTI->PR |= EXTI_PR_PR9;
             switch (curr_ir_state){
@@ -146,13 +145,7 @@ extern "C" {
                         curr_ir_error = ERROR_BIT_PROCESSING;
                     }
                     break;
-                case IR_STATE_REPEAT:
-                    //GPIOA->ODR &= ~(GPIO_ODR_OD5);
-                    GPIOA->ODR |= (GPIO_ODR_OD5 | GPIO_ODR_OD6 | GPIO_ODR_OD7);
-                    curr_ir_state = IR_STATE_IDLE;
-                    //UART2_Printf("REPEATE\r\n");
-                    break;
-                case IR_STATE_ERROR:
+               case IR_STATE_ERROR:
                     GPIOA->ODR |= GPIO_ODR_OD8;
                     //Disable EXTI9 to ignore rest of transmission until timer resets FSM and transmission tracking 
                     NVIC_DisableIRQ(EXTI9_5_IRQn);
@@ -173,7 +166,7 @@ extern "C" {
 
 void GPIO_init(void){
     // Enable GPIOA and B clock
-    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN;  
+    RCC->AHB1ENR |= RCC_AHB1ENR_GPIOAEN | RCC_AHB1ENR_GPIOCEN;  
     // Enable the system configuration controller
     RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
 
@@ -280,7 +273,9 @@ void execute_command(uint16_t command){
     GPIOA->ODR &= ~(GPIO_ODR_OD6 | GPIO_ODR_OD7);
     switch(command){
         // Plus button,     0b10110000 
+        // Max servo value is around 2500 or 2.5ms pulse width 
         case 176:
+            TIM5->CCR1 +=200;
             //GPIOA->ODR |= GPIO_ODR_OD5;
             break;
         // Power Button,    0b11000000 
@@ -288,7 +283,9 @@ void execute_command(uint16_t command){
             GPIOA->ODR |= GPIO_ODR_OD6;
             break;
         // Minus Button,    0b10001000 
+        // Lowest servo vaslue is around 500 or .5ms pulse width
         case 136:
+            TIM5->CCR1 -= 200;
             //GPIOA->ODR |= (GPIO_ODR_OD5 | GPIO_ODR_OD6) ;
             break;
         // Timer Button,    0b11010000
@@ -332,6 +329,7 @@ int main(void) {
 
 
     while (1) {
+        //UART2_Printf("CCR1: %i\r\n",TIM5->CCR1);
         switch(curr_ir_state){
             // If the counter is not running and the FSM is stuck in SETUP, reset back to IDLE
             // This often happens when spamming the buttons and holding long enough for the remote to send
@@ -365,6 +363,15 @@ int main(void) {
                 //GPIOA->ODR &= ~(GPIO_ODR_OD5);
                 NVIC_EnableIRQ(EXTI9_5_IRQn);
                 break;
+            case IR_STATE_REPEAT:
+                // Disable interrupts until the desired command execution is complete 
+                NVIC_DisableIRQ(EXTI9_5_IRQn);
+                //GPIOA->ODR &= ~(GPIO_ODR_OD5);
+                execute_command(command);
+                curr_ir_state = IR_STATE_IDLE;
+                NVIC_EnableIRQ(EXTI9_5_IRQn);
+                break;
+ 
             case IR_STATE_ERROR:
                     //Disable EXTI9 to ignore rest of transmission until timer resets FSM and transmission tracking 
                     // But only if the timer is running, if we are just stuck in ERROR state, reset below
