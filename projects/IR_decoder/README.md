@@ -7,7 +7,7 @@
 
 ## Decoder State Machine
 - The IR decoder uses a state machine to manage what the processor is doing at any given point
-- The state are:
+- The states are:
     - `IR_STATE_IDLE` = 0 
     - `IR_STATE_SETUP_1` = 1
     - `IR_STATE_SETUP_2` = 2
@@ -18,34 +18,34 @@
     - `IR_STATE_COMPLETE` = 7
 - Below is the diagram showing the different states and how the state machine manages states
 ![alt text](IR_decoder_FSM.png "IR Decoder FSM Diagram")
-- It's important to note that the program FSM current state doesn't execute the corresponding state actions or checks until the next interrupt.
+- It's important to note that the program FSM's current state doesn't execute the corresponding state actions or checks until the next interrupt.
   - For example, at startup, the current state is IDLE, if an interrupt occurs the current state is set to SETUP_1 but does not execute the SETUP_1 checks until the next interrupt. 
-- Another note is that the timer 2 prescalar value is set to 15 so that with the default 16MHz clock speed the counter counts about 1 count per 1 microsecond
-  - This means that if the counter value is 1000, 1 milisecond has passed
+- Another note is that the timer 2 pre scalar value is set to 15 so that with the default 16MHz clock speed the counter counts about 1 count per 1 microsecond
+  - This means that if the counter value is 1000, 1 millisecond has passed
 ### Walking through FSM States and Transitions
-- The FSM will always start in IDLE state and only leave that state if the EXTI9 interrupt line is triggered
-- Once a trigger occurs, the program enters the `IR_STATE_IDLE` case statement, where the FSM is set to SETUP_1 and starts the timer 2 counter used throughout a transmission frame for timing of pulse widths and a reset if the transmission goes beyond the frame timing or an error occurs
+- The FSM will always start in the IDLE state and only leave that state if the EXTI9 interrupt line is triggered
+- Once a trigger occurs, the program enters the `IR_STATE_IDLE` case statement, where the FSM is set to SETUP_1 and starts the timer 2 counter used throughout a transmission frame for the timing of pulse widths and a reset if the transmission goes beyond the frame timing or an error occurs
 - Upon the next interrupt, the counter value is checked
   - If the value is around 9000 (given +-500 for margin of error) the state enters setup 2
   - If the value is not within the margin of error, the state is set to ERROR
-    - After the TIM2 gets to the reset period value(a bit longer than a single IR transmission frame), the FSM is reset back to IDLE and all transmission value are reset
-- In SETUP_2, a similiar process to SETUP_1 occurs and checks if the time between setups is around 4500 (Again with +-500 MoE) or 2250 (with 250 MoE).
-  - If the setup 2 time is with 4500 range, the state is set to PROCESS_RISE
+    - After the TIM2 gets to the reset period value(a bit longer than a single IR transmission frame), the FSM is reset back to IDLE and all transmission values are reset
+- In SETUP_2, a similar process to SETUP_1 occurs and checks if the time between setups is around 4500 (Again with +-500 MoE) or 2250 (with 250 MoE).
+  - If the setup 2 time is within 4500 range, the state is set to PROCESS_RISE
   - If the setup 2 time is within 2250 range then the state is set to REPEAT
-  - Otherwise the state is set to ERROR
+  - Otherwise, the state is set to ERROR
 - The FSM enters data processing when first set to PROCESS_RISE. 
-  - In this state the program captures the current value of timer 2 for reference then checks if `timer_arr_index` is greather than or equal to 48
+  - In this state, the program captures the current value of timer 2 for reference and then checks if `timer_arr_index` is greater than or equal to 48
   - As the state name suggests this check occurs during the rising edge of the IR transmission and the start of the bit timing 
     - The `timer_arr_index` keeps track of pulse width timings of each data bit in an array
     - Since the transmission will send 48 bits in total, once the index reaches 48 the transmission is complete and enters the COMPLETE state
   - If the `timer_arr_index` is less than 48, then the FSM enters PROCESS_FALL 
-- In the PROCESS_FALL state and on the falling edge of the IR tranmsission the program captures the pulse width timing then checks if it's around 1400 (meaning logic 1 recieved) or around 700 (meaning logic 0 received), otherwise an error has occured and FSM is set to ERROR
+- In the PROCESS_FALL state and on the falling edge of the IR transmission the program captures the pulse width timing and then checks if it's around 1400 (meaning logic 1 received) or around 700 (meaning logic 0 received), otherwise an error has occurred and FSM is set to ERROR
 - When the FSM has processed all 48 bits, the FSM is set to COMPLETE. Within the main loop, the program polls the state of the FSM.
-  - If the state is COMPLETE, the EXTI is disabled to allow the necessary execution correspodning to the command to occur without disruption
+  - If the state is COMPLETE, the EXTI is disabled to allow the necessary execution corresponding to the command to occur without disruption
     - Once the command execution is complete the EXTI is re-enabled 
 
 # TODO
-- [ ] Implement basic that is around 100ms and we start the timer upon recieving signal, then reset `interrupt_count` and varibles like that after completion of the timer
+- [ ] Implement a basic that is around 100ms and we start the timer upon receiving the signal, then reset `interrupt_count` and variables like that after completion of the timer
     - This avoids if other IR remotes mess with our stuff we can recover
 # Program Flow
 - 
