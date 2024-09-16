@@ -8,6 +8,9 @@ typedef enum {
     //The second setup pulse is expected to be either 4.5ms(start of command) or 2.25ms(repeat prev command)
     IR_STATE_SETUP_2,
     IR_STATE_REPEAT,
+    //Second repeat state is since pulse width timing is measured then the signal returns HIGH while IDLE, so 
+    //the execution of command is done once state reaches second repeat
+    IR_STATE_REPEAT_2,
     IR_STATE_PROCESS_RISE,
     IR_STATE_PROCESS_FALL,
     IR_STATE_ERROR,      
@@ -114,7 +117,12 @@ extern "C" {
                         curr_ir_error = ERROR_SETUP_2;
                     }
                     break;
-
+                // IR signal returns HIGH after relevant pulses, thus we want to start processing and execute 
+                // the command once the IR signal is at it's IDLE state
+                case IR_STATE_REPEAT:
+                    curr_ir_state = IR_STATE_REPEAT_2;
+                    break;
+ 
                 case IR_STATE_PROCESS_RISE:
                     /*
                      * After completing a command, the IR signal ends the last bit logic LOW then returns
@@ -170,8 +178,8 @@ void GPIO_init(void){
     // Enable the system configuration controller
     RCC->APB2ENR |= RCC_APB2ENR_SYSCFGEN;
 
-    // Set PA6,7 and 8 as output(All LEDs)
-    GPIOA->MODER |= GPIO_MODER_MODE6_0 | GPIO_MODER_MODE7_0 | GPIO_MODER_MODE8_0;
+    // Set PA5,6,7 and 8 as output(All LEDs)
+    GPIOA->MODER |= GPIO_MODER_MODE5_0 |  GPIO_MODER_MODE6_0 | GPIO_MODER_MODE7_0 | GPIO_MODER_MODE8_0;
     // Set PA9 as input by clearing both mode bits, used for IR sesnor input
     GPIOA->MODER &= ~(GPIO_MODER_MODE9);
     // Set PA0 to alternate function 
@@ -266,43 +274,25 @@ void parse_transmission(uint8_t* address_low, uint8_t* address_high, uint8_t* co
 }
 
 
-//Function just turns on LEDs to indicate which button is pressed.
-// Function assums all bits in command are valid, if value doesn't match
-// inidcate with ERROR LED 
+// Based on incoming IR command value, either increase CCR1 (which increase
+// PWM duty cycle) to rotate servo counter clockwise, or decrease CCR1 to turn
+// servo clockwise. 
+// Check if the servo is at maximum duty cycle or angle, if it's within range, rotate servo
 void execute_command(uint16_t command){
-    GPIOA->ODR &= ~(GPIO_ODR_OD6 | GPIO_ODR_OD7);
     switch(command){
         // Plus button,     0b10110000 
         // Max servo value is around 2500 or 2.5ms pulse width 
         case 176:
-            TIM5->CCR1 +=200;
+            if(TIM5->CCR1<2500)
+                TIM5->CCR1 +=150;
             //GPIOA->ODR |= GPIO_ODR_OD5;
-            break;
-        // Power Button,    0b11000000 
-        case 192:
-            GPIOA->ODR |= GPIO_ODR_OD6;
             break;
         // Minus Button,    0b10001000 
         // Lowest servo vaslue is around 500 or .5ms pulse width
         case 136:
-            TIM5->CCR1 -= 200;
-            //GPIOA->ODR |= (GPIO_ODR_OD5 | GPIO_ODR_OD6) ;
+            if(TIM5->CCR1>500)
+                TIM5->CCR1 -= 150;
             break;
-        // Timer Button,    0b11010000
-        case 208:
-            GPIOA->ODR |= GPIO_ODR_OD7;
-            break;
-        // Mode Button,     0b11110000
-        case 240:
-            //GPIOA->ODR |= (GPIO_ODR_OD5 | GPIO_ODR_OD7);
-            break;
-        // Swivel Button,   0b11001000
-        case 200:
-            GPIOA->ODR |= (GPIO_ODR_OD6 | GPIO_ODR_OD7);
-            break;
-        //Default turns on ERROR LED
-        default:
-            GPIOA->ODR |= GPIO_ODR_OD8;
     }
     return;
 }
@@ -326,6 +316,7 @@ int main(void) {
     TIM2->CNT = 0;
     GPIOA->ODR |= GPIO_ODR_OD6 | GPIO_ODR_OD7;
     GPIOA->ODR &= ~(GPIO_ODR_OD8);
+    GPIOA->ODR |= GPIO_ODR_OD5;
 
 
     while (1) {
@@ -363,10 +354,9 @@ int main(void) {
                 //GPIOA->ODR &= ~(GPIO_ODR_OD5);
                 NVIC_EnableIRQ(EXTI9_5_IRQn);
                 break;
-            case IR_STATE_REPEAT:
+            case IR_STATE_REPEAT_2:
                 // Disable interrupts until the desired command execution is complete 
                 NVIC_DisableIRQ(EXTI9_5_IRQn);
-                //GPIOA->ODR &= ~(GPIO_ODR_OD5);
                 execute_command(command);
                 curr_ir_state = IR_STATE_IDLE;
                 NVIC_EnableIRQ(EXTI9_5_IRQn);
